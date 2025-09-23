@@ -6,3 +6,7 @@ feedparser==6.0.11
 yfinance==0.2.43
 scikit-learn==1.5.2
 streamlit==1.38.0
+openai==1.46.0
+python-dotenv==1.0.1
+numpy==2.1.1
+requests==2.32.3

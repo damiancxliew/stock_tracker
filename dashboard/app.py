@@ -1,15 +1,43 @@
-# app.py
-import os, sys, subprocess, duckdb, pandas as pd, yfinance as yf, streamlit as st, openai
+#app.py
+import os
+import subprocess
+import sys
+import duckdb
+import pandas as pd
+import yfinance as yf
+import streamlit as st
+import openai
 from dotenv import load_dotenv
+import numpy as np
 
-load_dotenv()
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "warehouse.duckdb")
+# --- Paths ---
+REPO_ROOT = os.path.dirname(os.path.dirname(__file__))  # go up from /dashboard
+DB_PATH = os.path.join(REPO_ROOT, "data", "warehouse.duckdb")
 
+# --- Streamlit page config ---
 st.set_page_config(page_title="US Stocks Intel", layout="wide")
 st.title("US Stocks – Trends & Filings Intel")
 
-openai_api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+# --- Secrets / API keys ---
+load_dotenv()  # enables local .env usage
+
+def get_secret(name: str, default: str | None = None):
+    val = os.getenv(name) or default
+    if val:
+        return val
+    try:
+        return st.secrets[name]
+    except Exception:
+        return default
+
+openai_api_key = get_secret("OPENAI_API_KEY")
 openai.api_key = openai_api_key
+
+if not openai_api_key:
+    st.sidebar.warning(
+        "OpenAI API Key not found. Set `OPENAI_API_KEY` in your environment "
+        "or in Streamlit Secrets when deploying."
+    )
 
 # ---------- Helpers ----------
 def load_ticker_list() -> list[str]:
