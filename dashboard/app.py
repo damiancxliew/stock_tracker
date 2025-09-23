@@ -3,12 +3,13 @@ import os, sys, subprocess, duckdb, pandas as pd, yfinance as yf, streamlit as s
 from dotenv import load_dotenv
 
 load_dotenv()
-DB_PATH = "../data/warehouse.duckdb"
+DB_PATH = os.path.join(os.path.dirname(__file__), "data", "warehouse.duckdb")
 
 st.set_page_config(page_title="US Stocks Intel", layout="wide")
 st.title("US Stocks – Trends & Filings Intel")
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+openai_api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+openai.api_key = openai_api_key
 
 # ---------- Helpers ----------
 def load_ticker_list() -> list[str]:
