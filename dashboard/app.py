@@ -137,6 +137,82 @@ def fmt_summary(text, max_len=120):
     s = "" if text is None else str(text)
     return s if len(s) <= max_len else s[:max_len] + "…"
 
+# Cache to avoid hammering Yahoo on every rerun
+@st.cache_data(ttl=900, show_spinner=False)
+def safe_download_price(ticker: str, period: str, interval: str) -> pd.DataFrame:
+    """
+    Robust Yahoo download:
+    - Adds a real UA (Cloud often gets 403/captcha without it)
+    - Normalizes bad period/interval combos
+    - Retries with fallbacks (1h->1d, shorter period) if needed
+    """
+    # Normalize incompatible combos
+    # Yahoo limits intraday history; keep it ≤ 60d for 1h
+    if interval == "1h":
+        allowed_periods = {"1mo", "3mo", "6mo"}
+        if period not in allowed_periods:
+            period = "6mo"
+
+    # Build a session with UA
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        )
+    })
+
+    def _try(dl_period, dl_interval, tries=3, sleep=1.0):
+        last_exc = None
+        for _ in range(tries):
+            try:
+                df = yf.download(
+                    ticker,
+                    period=dl_period,
+                    interval=dl_interval,
+                    progress=False,
+                    session=session,
+                    threads=False,  # avoid odd concurrency issues on Cloud
+                    auto_adjust=False,
+                )
+                if isinstance(df, pd.DataFrame) and not df.empty:
+                    return df
+            except Exception as e:
+                last_exc = e
+            time.sleep(sleep)
+        if last_exc:
+            raise last_exc
+        return pd.DataFrame()
+
+    # 1) first attempt as requested
+    try:
+        df = _try(period, interval)
+        if not df.empty:
+            return df
+    except Exception:
+        pass
+
+    # 2) if intraday failed, fallback to daily bars with same period
+    if interval != "1d":
+        try:
+            df = _try(period, "1d")
+            if not df.empty:
+                return df
+        except Exception:
+            pass
+
+    # 3) final fallback: daily bars, shorter period
+    for p in ["3mo", "1mo", "5d"]:
+        try:
+            df = _try(p, "1d")
+            if not df.empty:
+                return df
+        except Exception:
+            pass
+
+    return pd.DataFrame()
+
 # ---------- Sidebar controls ----------
 st.sidebar.header("Controls")
 
@@ -172,23 +248,15 @@ if generate_clicked:
             status.update(label="Scraping failed.", state="error")
 
 # ---------- Price chart ----------
-@st.cache_data(ttl=900)
-def get_price(ticker: str, period: str, interval: str) -> pd.DataFrame:
-    try:
-        df = yf.download(ticker, period=period, interval=interval, progress=False, threads=False)
-        if df is None or df.empty:
-            # fallback
-            df = yf.Ticker(ticker).history(period=period, interval=interval)
-        return df if df is not None else pd.DataFrame()
-    except Exception:
-        return pd.DataFrame()
-
-price = get_price(ticker, period, interval)
+st.subheader(f"Price – {ticker}")
+price = safe_download_price(ticker, period=period, interval=interval)
 if not price.empty and "Close" in price.columns:
     st.line_chart(price["Close"])
 else:
-    st.warning(f"Could not fetch price data for {ticker}. Try a shorter period/1d interval.")
-
+    st.warning(
+        f"Could not fetch price data for {ticker}. "
+        "Yahoo sometimes blocks cloud requests; try a shorter period, 1d candles, or another ticker."
+    )
 
 # ---------- Load & show data ----------
 sec_df, news_df = fetch_db(ticker)
