@@ -11,6 +11,8 @@ import openai
 from openai import OpenAI
 from dotenv import load_dotenv
 import numpy as np
+from pandas_datareader import data as pdr
+import time
 
 # --- Paths ---
 REPO_ROOT = os.path.dirname(os.path.dirname(__file__))  # go up from /dashboard
@@ -138,81 +140,81 @@ def fmt_summary(text, max_len=120):
     s = "" if text is None else str(text)
     return s if len(s) <= max_len else s[:max_len] + "…"
 
-# Cache to avoid hammering Yahoo on every rerun
 @st.cache_data(ttl=900, show_spinner=False)
 def safe_download_price(ticker: str, period: str, interval: str) -> pd.DataFrame:
     """
-    Robust Yahoo download:
-    - Adds a real UA (Cloud often gets 403/captcha without it)
-    - Normalizes bad period/interval combos
-    - Retries with fallbacks (1h->1d, shorter period) if needed
+    Try Yahoo Finance first (with real UA + retries). If it fails/returns empty,
+    fall back to Stooq daily data (1y history) so charts still render.
     """
-    # Normalize incompatible combos
-    # Yahoo limits intraday history; keep it ≤ 60d for 1h
+
+    # ---- Normalize incompatible intraday combos ----
     if interval == "1h":
         allowed_periods = {"1mo", "3mo", "6mo"}
         if period not in allowed_periods:
             period = "6mo"
 
-    # Build a session with UA
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        )
-    })
-
-    def _try(dl_period, dl_interval, tries=3, sleep=1.0):
+    def _try_yahoo(dl_period, dl_interval, tries=3, sleep=1.0):
         last_exc = None
         for _ in range(tries):
             try:
+                # path 1: download()
                 df = yf.download(
                     ticker,
                     period=dl_period,
                     interval=dl_interval,
                     progress=False,
-                    session=session,
-                    threads=False,  # avoid odd concurrency issues on Cloud
+                    threads=False,
                     auto_adjust=False,
                 )
                 if isinstance(df, pd.DataFrame) and not df.empty:
                     return df
+
+                # path 2: Ticker().history()
+                t = yf.Ticker(ticker, session=session)
+                df2 = t.history(period=dl_period, interval=dl_interval, auto_adjust=False)
+                if isinstance(df2, pd.DataFrame) and not df2.empty:
+                    return df2
+
             except Exception as e:
                 last_exc = e
             time.sleep(sleep)
         if last_exc:
-            raise last_exc
+            # surface the last error in the Streamlit UI for debugging
+            st.info(f"Yahoo fallback triggered for {ticker}: {last_exc}")
         return pd.DataFrame()
 
-    # 1) first attempt as requested
-    try:
-        df = _try(period, interval)
+    # 1) as requested
+    df = _try_yahoo(period, interval)
+    if not df.empty:
+        return df
+
+    # 2) intraday → daily fallback
+    if interval != "1d":
+        df = _try_yahoo(period, "1d")
         if not df.empty:
             return df
-    except Exception:
-        pass
 
-    # 2) if intraday failed, fallback to daily bars with same period
-    if interval != "1d":
-        try:
-            df = _try(period, "1d")
-            if not df.empty:
-                return df
-        except Exception:
-            pass
-
-    # 3) final fallback: daily bars, shorter period
+    # 3) shorter period daily
     for p in ["3mo", "1mo", "5d"]:
-        try:
-            df = _try(p, "1d")
-            if not df.empty:
-                return df
-        except Exception:
-            pass
+        df = _try_yahoo(p, "1d")
+        if not df.empty:
+            return df
+
+    # ---- Stooq fallback (daily only) ----
+    try:
+        st.info("Using Stooq fallback for price data (daily bars).")
+        # Stooq returns oldest→newest; ensure a DateTimeIndex named 'Date'
+        stooq = pdr.DataReader(ticker, "stooq")
+        if isinstance(stooq, pd.DataFrame) and not stooq.empty:
+            stooq = stooq.sort_index()  # ascending
+            # Align columns to Yahoo naming if present
+            # Stooq columns are typically: Open, High, Low, Close, Volume
+            return stooq
+    except Exception as e:
+        st.warning(f"Stooq fallback failed for {ticker}: {e}")
 
     return pd.DataFrame()
+
 
 # ---------- Sidebar controls ----------
 st.sidebar.header("Controls")
