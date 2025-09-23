@@ -148,30 +148,30 @@ period = st.sidebar.selectbox("Price period", ["1mo","3mo","6mo","1y","2y"], ind
 interval = st.sidebar.selectbox("Candle interval", ["1d","1h"], index=0)
 item_limit = st.sidebar.slider("Scrape max items (per spider)", 5, 100, 25, step=5)
 
-is_cloud = os.environ.get("STREAMLIT_RUNTIME") == "1"
-if is_cloud:
-    st.sidebar.info("Spiders are disabled on Streamlit Cloud. Run them locally to refresh the DB.")
-else:
+# is_cloud = os.environ.get("STREAMLIT_RUNTIME") == "1"
+# if is_cloud:
+#     st.sidebar.info("Spiders are disabled on Streamlit Cloud. Run them locally to refresh the DB.")
+# else:
     # 2) generate button
-    generate_clicked = st.sidebar.button("⚡ Generate latest data")
-    # ---------- Run spiders on demand ----------
-    if generate_clicked:
-        st.sidebar.info(f"Running spiders for {ticker} (limit {item_limit})…")
-        # set cwd to your scrapy project root (where scrapy.cfg lives)
-        SCRAPY_CWD = os.path.abspath(os.path.join(os.path.dirname(__file__), "../scraper"))
-        with st.status("Scraping in progress…", expanded=True) as status:
-            ok1, log1 = run_spider("sec_filings", ticker, item_limit=item_limit, cwd=SCRAPY_CWD)
-            st.write("SEC filings spider finished." if ok1 else "SEC filings spider failed.")
-            st.code(log1[-4000:])  # tail logs
+generate_clicked = st.sidebar.button("⚡ Generate latest data")
+# ---------- Run spiders on demand ----------
+if generate_clicked:
+    st.sidebar.info(f"Running spiders for {ticker} (limit {item_limit})…")
+    # set cwd to your scrapy project root (where scrapy.cfg lives)
+    SCRAPY_CWD = os.path.abspath(os.path.join(os.path.dirname(__file__), "../scraper"))
+    with st.status("Scraping in progress…", expanded=True) as status:
+        ok1, log1 = run_spider("sec_filings", ticker, item_limit=item_limit, cwd=SCRAPY_CWD)
+        st.write("SEC filings spider finished." if ok1 else "SEC filings spider failed.")
+        st.code(log1[-4000:])  # tail logs
 
-            ok2, log2 = run_spider("yahoo_news_rss", ticker, item_limit=item_limit, cwd=SCRAPY_CWD)
-            st.write("Yahoo News spider finished." if ok2 else "Yahoo News spider failed.")
-            st.code(log2[-4000:])
+        ok2, log2 = run_spider("yahoo_news_rss", ticker, item_limit=item_limit, cwd=SCRAPY_CWD)
+        st.write("Yahoo News spider finished." if ok2 else "Yahoo News spider failed.")
+        st.code(log2[-4000:])
 
-            if ok1 or ok2:
-                status.update(label="Scraping done. Reloading data…", state="complete")
-            else:
-                status.update(label="Scraping failed.", state="error")
+        if ok1 or ok2:
+            status.update(label="Scraping done. Reloading data…", state="complete")
+        else:
+            status.update(label="Scraping failed.", state="error")
 
 # ---------- Price chart ----------
 st.subheader(f"Price – {ticker}")
