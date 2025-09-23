@@ -14,3 +14,4 @@ twisted==24.7.0
 cryptography==42.0.8
 httpx==0.27.2
 httpcore==1.0.5
+requests

@@ -4,6 +4,7 @@ import subprocess
 import sys
 import duckdb
 import pandas as pd
+import requests
 import yfinance as yf
 import streamlit as st
 import openai
