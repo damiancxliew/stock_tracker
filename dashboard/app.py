@@ -7,6 +7,7 @@ import pandas as pd
 import yfinance as yf
 import streamlit as st
 import openai
+from openai import OpenAI
 from dotenv import load_dotenv
 import numpy as np
 
@@ -32,6 +33,7 @@ def get_secret(name: str, default: str | None = None):
 
 openai_api_key = get_secret("OPENAI_API_KEY")
 openai.api_key = openai_api_key
+client = OpenAI(api_key=openai_api_key)
 
 if not openai_api_key:
     st.sidebar.warning(
@@ -148,11 +150,7 @@ period = st.sidebar.selectbox("Price period", ["1mo","3mo","6mo","1y","2y"], ind
 interval = st.sidebar.selectbox("Candle interval", ["1d","1h"], index=0)
 item_limit = st.sidebar.slider("Scrape max items (per spider)", 5, 100, 25, step=5)
 
-# is_cloud = os.environ.get("STREAMLIT_RUNTIME") == "1"
-# if is_cloud:
-#     st.sidebar.info("Spiders are disabled on Streamlit Cloud. Run them locally to refresh the DB.")
-# else:
-    # 2) generate button
+# 2) generate button
 generate_clicked = st.sidebar.button("⚡ Generate latest data")
 # ---------- Run spiders on demand ----------
 if generate_clicked:
@@ -174,12 +172,23 @@ if generate_clicked:
             status.update(label="Scraping failed.", state="error")
 
 # ---------- Price chart ----------
-st.subheader(f"Price – {ticker}")
-price = yf.download(ticker, period=period, interval=interval, progress=False)
+@st.cache_data(ttl=900)
+def get_price(ticker: str, period: str, interval: str) -> pd.DataFrame:
+    try:
+        df = yf.download(ticker, period=period, interval=interval, progress=False, threads=False)
+        if df is None or df.empty:
+            # fallback
+            df = yf.Ticker(ticker).history(period=period, interval=interval)
+        return df if df is not None else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+
+price = get_price(ticker, period, interval)
 if not price.empty and "Close" in price.columns:
     st.line_chart(price["Close"])
 else:
-    st.warning(f"Could not fetch price data for {ticker}.")
+    st.warning(f"Could not fetch price data for {ticker}. Try a shorter period/1d interval.")
+
 
 # ---------- Load & show data ----------
 sec_df, news_df = fetch_db(ticker)
@@ -301,7 +310,7 @@ else:
                 f"Last Price Change: {price_change_str}\n\n"
                 "Generate the insights now."
             )
-            resp = openai.chat.completions.create(
+            resp = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.5,
